@@ -1,0 +1,169 @@
+# 1：Flink运行时的组件
+
+​     Flink运行时架构主要包括四个不同的组件，它们会在运行流处理应用程序时协同工作：
+
+- **作业管理器（JobManager）**
+- **资源管理器（ResourceManager）**
+- **任务管理器（TaskManager）**
+- **分发器（Dispatcher）**
+
+## 1.1  作业管理器（JobManager）
+
+   控制一个应用程序执行的主进程，也就是说，每个应用程序都会被一个不同的JobManager所控制执行。 **JobManager会先接收到要执行的应用程序，这个应用程序会包括**：
+
+- 作业图（JobGraph）
+- 逻辑数据流图（logical dataflow graph）
+- 打包了所有的类、库和其它资源的JAR包。
+
+​    JobManager会把JobGraph转换成一个物理层面的数据流图，这个图被叫做“执行图”（ExecutionGraph），包含了所有可以并发执行的任务。
+
+​    **JobManager会向资源管理器（ResourceManager）请求执行任务必要的资源，也就是任务管理器（TaskManager）上的插槽（slot）。一旦它获取到了足够的资源，就会将执行图分发到真正运行它们的TaskManager上**。
+
+   在运行过程中，JobManager会负责所有需要中央协调的操作，比如说检查点（checkpoints）的协调。
+
+## 1.2 资源管理器（ResourceManager）
+
+​    主要负责管理任务管理器（TaskManager）的插槽（slot），TaskManger插槽是Flink中定义的处理资源单元。Flink为不同的环境和资源管理工具提供了不同资源管理器，比如YARN、Mesos、K8s，以及standalone部署。 **当JobManager申请插槽资源时，ResourceManager会将有空闲插槽的TaskManager分配给JobManager**。如果ResourceManager没有足够的插槽来满足JobManager的请求，它还可以向资源提供平台发起会话，以提供启动TaskManager进程的容器。
+
+  另外，**ResourceManager还负责终止空闲的TaskManager，释放计算资源**。
+
+## 1.3  任务管理器（TaskManager）
+
+​     Flink中的工作进程。通常在Flink中会有多个TaskManager运行，每一个TaskManager都包含了一定数量的插槽（slots）。**插槽的数量限制了TaskManager能够执行的任务数量**。     启动之后，TaskManager会向资源管理器注册它的插槽；收到资源管理器的指令后，TaskManager就会将一个或者多个插槽提供给JobManager调用。JobManager就可以向插槽分配任务（tasks）来执行了。 **在执行过程中，一个TaskManager可以跟其它运行同一应用程序的TaskManager交换数据**。
+
+## 1.4 分发器（Dispatcher）
+
+可以跨作业运行，它为应用提交提供了REST接口。
+
+ 当一个应用被提交执行时，分发器就会启动并将应用移交给一个JobManager。由于是REST接口，所以Dispatcher可以作为集群的一个HTTP接入点，这样就能够不受防火墙阻挡。Dispatcher也会启动一个Web UI，用来方便地展示和监控作业执行的信息。
+
+
+
+# 2：任务的提交流程
+
+我们将Flink集群部署到YARN上，那么就会有如下的提交流程：
+
+1. Flink任务提交后，Client向HDFS上传Flink的Jar包和配置
+2. 之后客户端向Yarn ResourceManager提交任务，ResourceManager分配Container资源并通知对应的NodeManager启动ApplicationMaster
+3. ApplicationMaster启动后加载Flink的Jar包和配置构建环境，去启动JobManager，之后**JobManager向Flink自身的RM进行申请资源，自身的RM向Yarn 的ResourceManager申请资源(因为是yarn模式，所有资源归yarn RM管理)启动TaskManager**
+4. Yarn ResourceManager分配Container资源后，由ApplicationMaster通知资源所在节点的NodeManager启动TaskManager
+5. NodeManager加载Flink的Jar包和配置构建环境并启动TaskManager，TaskManager启动后向JobManager发送心跳包，并等待JobManager向其分配任务。
+
+# 3：任务调度原理
+
+1. 客户端不是运行时和程序执行的一部分，但它用于准备并发送dataflow(JobGraph)给Master(JobManager)，然后，客户端断开连接或者维持连接以等待接收计算结果。而Job Manager会产生一个执行图(Dataflow Graph)
+2. 当 Flink 集群启动后，首先会启动一个 JobManger 和一个或多个的 TaskManager。由 Client 提交任务给 JobManager，JobManager 再调度任务到各个 TaskManager 去执行，然后 TaskManager 将心跳和统计信息汇报给 JobManager。TaskManager 之间以流的形式进行数据的传输。上述三者均为独立的 JVM 进程。
+3. Client 为提交 Job 的客户端，可以是运行在任何机器上（与 JobManager 环境连通即可）。提交 Job 后，Client 可以结束进程（Streaming的任务），也可以不结束并等待结果返回。
+4. JobManager 主要负责调度 Job 并协调 Task 做 checkpoint，职责上很像 Storm 的 Nimbus。从 Client 处接收到 Job 和 JAR 包等资源后，会生成优化后的执行计划，并以 Task 的单元调度到各个 TaskManager 去执行。
+5. TaskManager 在启动的时候就设置好了槽位数（Slot），每个 slot 能启动一个 Task，Task 为线程。从 JobManager 处接收需要部署的 Task，部署启动后，与自己的上游建立 Netty 连接，接收数据并处理。
+
+
+
+# 4：Flink流处理API
+
+## 4.1 Environment
+
+### 4.1.1 getExecutionEnvironment
+
+​    创建一个执行环境，表示当前执行程序的上下文。如果程序是独立调用的，则此方法返回本地执行环境；如果从命令行客户端调用程序以提交到集群，则此方法返回此集群的执行环境，也就是说，getExecutionEnvironment会根据查询运行的方式决定返回什么样的运行环境，是最常用的一种创建执行环境的方式。
+
+```java
+StreamExecutionEnvironment env= StreamExecutionEnvironment.getExecutionEnvironment();
+```
+
+如果没有设置并行度，会以flink-conf.yaml中的配置为准，默认是1。
+
+### 4.1.2 createLocalEnvironment
+
+​     返回本地执行环境，需要在调用时指定默认的并行度。
+
+```java
+LocalStreamEnvironment envLocal = StreamExecutionEnvironment.createLocalEnvironment(2);
+```
+
+### 4.1.3 createRemoteEnvironment
+
+​    返回集群执行环境，将Jar提交到远程服务器。需要在调用时指定JobManager的IP和端口号，并指定要在集群中运行的Jar包。
+
+```java
+StreamExecutionEnvironment envRemote = StreamExecutionEnvironment.createRemoteEnvironment();
+```
+
+## 4.2 Source
+
+### 4.2.1 从集合中读取数据
+
+```java
+public class FlinkTest {
+    public static void main(String[] args) throws Exception {
+        // 创建执行环境
+        StreamExecutionEnvironment env= StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(1);
+        // Source: 从集合Collection中获取数据
+        DataStream<Goods> dataStream = env.fromCollection(
+                Arrays.asList(
+                        new Goods(111L,"sensor_1", 1547718199L, "111"),
+                        new Goods(111L,"sensor_2", 1547718199L, "111"),
+                        new Goods(111L,"sensor_3", 1547718199L, "111"),
+                        new Goods(111L,"sensor_4", 1547718199L, "111")
+                )
+        );
+        DataStream<Integer> intStream = env.fromElements(1,2,3,4,5,6,7,8,9);
+        // 打印输出
+        dataStream.print("SENSOR");
+        intStream.print("INT");
+        // 执行
+        env.execute("JobName");
+    }
+}
+```
+
+### 4.2.2 自定义Source
+
+```java
+/**
+ * 自定义的 输入源
+ * @throws Exception
+ */
+public static void test2() throws Exception {
+    // 创建执行环境
+    StreamExecutionEnvironment env= StreamExecutionEnvironment.getExecutionEnvironment();
+    // 本地执行环境
+    env.setParallelism(1);
+    DataStream<Goods> dataStream = env.addSource(new MySensorSource());
+    dataStream.print();
+    // 执行
+    env.execute("JobName");
+}
+
+
+public class MySensorSource implements SourceFunction<Goods> {
+
+    private volatile boolean running = true;
+    @Override
+    public void run(SourceContext<Goods> sourceContext) throws Exception {
+        Random random = new Random();
+       // 设置10个商品的初始值
+        HashMap<String, Double> goodsMap = new HashMap<>(10);
+        for (int i = 0; i < 10; ++i) {
+            goodsMap.put("goods_"+ (i + 1), 60 + random.nextGaussian() * 20);
+        }
+        while (running) {
+            for (String goodId : goodsMap.keySet()) {
+                // 在当前温度基础上随机波动
+                double newTemp = goodsMap.get(goodId) + random.nextGaussian();
+                goodsMap.put(goodId, newTemp);
+                sourceContext.collect(new Goods(goodId,1L,"",2L,"",newTemp));
+            }
+            // 控制输出评率
+            Thread.sleep(1000L);
+        }
+    }
+
+    @Override
+    public void cancel() {
+        this.running = false;
+    }
+}
+
+```

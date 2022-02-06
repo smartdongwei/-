@@ -1,0 +1,214 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: governance
+  namespace: datagovernance
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      project: datagovernance
+      app: governance
+  template:
+    metadata:
+      labels:
+        project: datagovernance
+        app: governance
+    spec:
+      containers:
+      - name: governance
+        image: 10.1.7.121/datagovernance/governance:latest
+        imagePullPolicy: Always
+        volumeMounts:
+        - name: governance-config
+          mountPath: /etc/nginx/conf.d/default.conf
+          subPath: default.conf
+        - name: governance-config
+          mountPath: /usr/share/nginx/html/governance/buildConfig.js
+          subPath: buildConfig.js
+        ports:
+        - containerPort: 8888
+          name: web
+          protocol: TCP
+          hostPort: 8888 
+      volumes:
+        - name: governance-config
+          configMap:
+            name: governance-config
+            items:
+            - key: default.conf
+              path: default.conf
+            - key: buildConfig.js
+              path: buildConfig.js
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: governance
+  namespace: datagovernance
+  labels:
+    project: datagovernance
+    app: governance
+    svc: governance-svc
+spec:
+  selector:
+    project: datagovernance
+    app: governance
+  ports:
+  - name: web
+    port: 8888
+    targetPort: 8888
+  type: NodePort
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: governance-config
+  namespace: datagovernance
+data:
+  default.conf: |
+      server {
+        listen       8888;
+        location ^~ /cas {
+                        proxy_pass   http://10.1.6.54:8180/cas;
+                        proxy_redirect  off;
+                proxy_set_header  Host $http_host;
+                proxy_set_header  X-Real-IP $remote_addr;
+                proxy_set_header  X-Forwarded-For $proxy_add_x_forwarded_for;
+                chunked_transfer_encoding off;
+                client_max_body_size 100m;
+            }
+        location /datagovernance/{
+            proxy_pass http://10.1.8.159:8081/datagovernance/;            
+            proxy_set_header Host  $http_host;
+            }
+
+        location /governance {
+            root /usr/share/nginx/html;
+                index  index.html index.htm;
+            try_files $uri $uri/ /governance/index.html;
+        }
+
+        location /factorygateway/{
+               proxy_pass http://10.1.8.160:2999/factorygateway/;
+               proxy_set_header Host  $http_host;
+            }
+        
+        location /classifyserver/interface/{
+               proxy_pass http://10.1.13.88/classifyserver/interface/;
+               proxy_set_header Host  $http_host;
+            }
+        location /report/{
+               proxy_pass http://10.1.9.170:8121/;
+               proxy_set_header Host  $http_host;
+            }
+        location ^~ /stdMng/ {
+               proxy_pass http://10.1.13.71:8080/stdMng/;
+               proxy_set_header Host  $http_host;
+            }
+        location /saveOrUpdateApprovalInfo/{
+                    proxy_pass http://10.1.8.159:8081/datagovernance/;
+                    proxy_set_header Host  $http_host;
+            }
+        location /register {
+                root /usr/share/nginx/html;
+            index  index.html index.htm;
+            try_files $uri $uri/ /register/index.html;
+        }
+        location ^~ /InceptCenter/message {
+                proxy_pass    http://10.1.8.159:8045/InceptCenter/message;
+                proxy_redirect  off;
+                proxy_set_header Host $http_host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-NginX-Proxy true;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $http_upgrade;
+                #proxy_set_header Connection $connection_upgrade;
+            }
+        location ^~ /eureka/ {
+                proxy_pass   http://10.1.8.159:8041/eureka/;
+                proxy_redirect  off;
+                proxy_set_header Host $http_host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                chunked_transfer_encoding off;
+            }
+        location ^~ /data_classify {
+                proxy_pass http://10.1.8.86:12020/data_classify;
+                proxy_redirect off;
+                proxy_set_header Host $http_host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            }
+        location /standardize {
+                root /usr/share/nginx/html;
+                index  index.html index.html;
+                try_files $uri $uri/ /standardize/index.html;
+            }
+        location ^~ /standardizeCfg/ {
+                proxy_pass http://10.1.8.61:8080/standardizeCfg/;
+                proxy_redirect  off;
+                proxy_set_header Host $http_host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            }
+
+        location /SynWF {
+                proxy_pass  http://10.1.9.170:8765/SynWF;
+                proxy_redirect  off;
+                proxy_set_header Host $http_host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                client_max_body_size 1000m;
+                chunked_transfer_encoding off;
+            }
+        }
+  buildConfig.js: |
+      window.ipConfig = {
+      governaceIp: "10.1.8.159:8888",
+      // 如有不同服务器地址在下面进行添加
+      resourceIp: "10.1.8.101:1000"
+      };
+      window.apiHostSetting = {
+      // 数据治理的url
+            VUE_APP_DATAGOVERNACEMAINWEB: "http://" + window.ipConfig.governaceIp + "/datagovernance/index.html",
+      //本地url
+            governaceWarWeb: window.ipConfig.governaceIp + "/factorygateway/datagovernance",
+      //数据资源服务平台
+            DATA_RESOURCE: "http://" + window.ipConfig.resourceIp + "/classify/#/dataDetailPage",
+      // 数据资产管理页面
+            DATA_ASSET_MANAGE: "http://" + window.ipConfig.governaceIp + "/factorygateway/datastandardmanager/dataStandardManager/resourceManageProperty",
+      // 标准
+            DATA_DATASTANDARDMANAGER: "http://" + window.ipConfig.governaceIp + "/governance",
+      // 默认iframe的src
+            DATA_IFRAMESRC: "http://" + window.ipConfig.governaceIp + "/governance/dataStorageIndex",
+      // 帮助
+            DATA_INTRODUCTION: "http://" + window.ipConfig.governaceIp + "/governance/setting",
+      };
+      window.dataQualitySummaryDict = {
+            dataQualityReport: "http://" + window.location.host + "/governance/reportManage",
+            dataQualityAllTablesSum: "http://" + window.location.host + "/governance/reportTaskManagePage&title=检测任务管理",
+            dataQualityAllColumnsSum: "http://" + window.location.host + "/governance/detectionRule&title=检测规则管理",
+            //活表率
+            liveTableRote: "http://" + window.location.host + "/governance/formOrganizationIndex?liveType=NONLIVING&title=表组织资产状况",
+            // 国标码表
+            nationalStandardTablesSum: window.apiHostSetting.DATA_DATASTANDARDMANAGER + "/nationalCodeTableMonitor&title=国标码表管理",
+            // 地标码表
+            landMarkTablesSum: window.apiHostSetting.DATA_DATASTANDARDMANAGER + "/regionalCodeTableMonitor&title=地标码表管理",
+            // 异常模型
+            abnormalModelsSum: "http://" + window.apiHostSetting.governaceWarWeb + "/datagovernance/dataOperation/modelMonitor&title=工作流监控",
+            //异常链路对账
+            abnormalBillsSum: "http://" + window.location.host + "/governance/billingAlarm?alarmType=1&title=数据异常监控",
+            //审批页面
+            approvalPage: "http://" + window.apiHostSetting.governaceWarWeb + "/datagovernance/process/approval?approvalId=",
+            //登出
+            logout: "http://" + window.apiHostSetting.governaceWarWeb + "/datagovernance/navbar/logout"
+      };
+      //华为或者阿里
+      window.platFormType = "阿里";
+      //省厅或者地市
+      window.areaFormType = "地市";
+      // 大屏接口开关定义
+      window.largeSreenSwitch = true;

@@ -1,0 +1,63 @@
+kind: Deployment
+apiVersion: extensions/v1beta1
+metadata:
+  name: mqnamesrv
+  namespace: datagovernance
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mqnamesrv
+      project: datagovernance
+  template:
+    metadata:
+     labels:
+      app: mqnamesrv
+      project: datagovernance
+    spec:
+      containers:
+      - name: mqnamesrv
+        image: 10.1.7.121/datagovernance/rocketmq:4.3.2
+        command: ["sh","mqnamesrv"]
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9876
+          name: web
+          protocol: TCP
+          hostPort: 9876
+        resources:
+          limits:
+            cpu: 1024m
+            memory: 2Gi
+          requests:
+            cpu: 600m
+            memory: 400Mi
+        volumeMounts:
+          - mountPath: /home/rocketmq/logs
+            name: namesrvlogs
+      volumes:
+      - name: namesrvlogs
+        hostPath:
+          path: /home/ckw/rocketmq/namesrv_a/logs
+      - name: namesrvstore 
+        hostPath:
+          path: /home/ckw/rocketmq/namesrv_a/store
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mqnamesrv
+  namespace: datagovernance
+  labels:
+    project: datagovernance
+    app: mqnamesrv
+    svc: mqnamesrv-svc
+spec:
+  selector:
+    project: datagovernance
+    app: mqnamesrv
+  ports:
+  - name: web
+    port: 9876
+    targetPort: 9876
+  type: NodePort

@@ -1,0 +1,1 @@
+​    transmittableThreadLocal 相比较 InheritableThreadLocal 很关键的一点改进是引入holder变量，这样就不必对外暴露Thread中的 **inheritableThreadLocals**(参考[InheritableThreadLocal详解](https://www.jianshu.com/p/94ba4a918ff5))，保持ThreadLocal.ThreadLocalMap的封装性。

@@ -1,0 +1,45 @@
+kind: Deployment
+apiVersion: extensions/v1beta1
+metadata:
+  name: mqbroker
+  namespace: datagovernance  
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mqbroker
+      name: mqbroker
+  template:
+    metadata:
+     labels:
+      app: mqbroker
+      name: mqbroker
+      project: datagovernance
+    spec:
+      containers:
+      - name: mqbroker
+        image: 10.1.7.121/datagovernance/rocketmq:4.3.2
+        command: ["sh","mqbroker", "-n","mqnamesrv:9876"]
+        imagePullPolicy: IfNotPresent
+        ports:
+          - containerPort: 10909
+          - containerPort: 10911
+        resources:
+          limits:
+            cpu: 1024m
+            memory: 2Gi
+          requests:
+            cpu: 600m
+            memory: 400Mi 
+        volumeMounts:
+          - mountPath: /home/rocketmq/logs
+            name: brokerlogs
+          - mountPath: /home/rocketmq/store
+            name: brokerstore
+      volumes:
+      - name: brokerlogs
+        hostPath:
+          path: /home/ckw/rocketmq/broker_a/logs
+      - name: brokerstore
+        hostPath:
+          path: /home/ckw/rocketmq/broker_a/store 

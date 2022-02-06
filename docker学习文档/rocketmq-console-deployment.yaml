@@ -1,0 +1,49 @@
+kind: Deployment
+apiVersion: extensions/v1beta1
+metadata:
+  name: mqconsole
+  namespace: datagovernance  
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mqconsole
+      name: mqconsole
+  template:
+    metadata:
+     labels:
+      app: mqconsole
+      name: mqconsole
+      project: datagovernance
+    spec:
+      containers:
+      - name: mqconsole
+        image: 10.1.7.121/datagovernance/rocketmq-console-ng
+        env:
+        - name: JAVA_OPTS
+          value: -Dlogging.level.root=info  -Drocketmq.namesrv.addr=mqnamesrv:9876
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: web
+          protocol: TCP
+          hostPort: 9999 
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mqconsole
+  namespace: datagovernance
+  labels:
+    project: datagovernance
+    app: mqconsole
+    svc: mqconsole-svc
+spec:
+  selector:
+    project: datagovernance
+    app: mqconsole
+  ports:
+  - name: web
+    port: 8080
+    targetPort: 9999
+  type: NodePort
