@@ -204,3 +204,171 @@ docker run -it --rm --link zookeeper:zookeeper zookeeper:3.5.7 zkCli.sh -server 
 
 ​    如果有很多个节点，不能直接使用删除delete，需要删除deleteall，查看节点的状态信息 stat。
 
+
+## 6：原始Zookeeper的api信息
+
+### 6.1 zk连接
+
+  **相关连接参数信息如下：**
+
+- **connectString：**多个zookeeper IP地址用逗号分隔，也可以在后面带上节点，这样后续对节点的所有操作都是在这个节点之下，例如connectString为10.0.4.105:2181,10.0.4.120:2181,10.0.4.129:2182/xxxx，然后使用create /app，这样创建出来的节点的绝对路径为/xxxx/app，这样操作一定要确保/xxxx先存在，否则会报错。
+- **sessionTimeout：**session超时时间，单位为ms。
+- **watcher：**监听连接的状态，代码中使用了同步计数器CountDownLatch，因为new Zookeeper创建对象立马就会返回了，而客户端连接到服务端是耗时的，这个时候并没有真正的连接成功，如果这个时候拿zk客户端对象去做操作会报错，所以要等待连接建立成功的时候才能使用客户端对象。
+
+
+```java
+@ConfigurationProperties(prefix = "zookeeper")
+@Data
+public class ZookeeperProperties {
+    /**
+     * 服务端地址信息  127.0.0.1:2181
+     */
+    private String address;
+    /**
+     * 超时时间  毫秒
+     */
+    private int timeout;
+
+}
+```
+
+```java
+@Slf4j
+@Configuration
+@EnableConfigurationProperties(ZookeeperProperties.class)
+public class ZookeeperClient {
+
+    @Autowired
+    private ZookeeperProperties properties;
+
+    @Bean(name = "zkClient")
+    public ZooKeeper zkClient(){
+        ZooKeeper zooKeeper=null;
+        try {
+            final CountDownLatch countDownLatch = new CountDownLatch(1);
+            //连接成功后，会回调watcher监听，此连接操作是异步的，执行完new语句后，直接调用后续代码
+            //  可指定多台服务地址 127.0.0.1:2181,127.0.0.1:2182,127.0.0.1:2183
+            zooKeeper = new ZooKeeper(properties.getAddress(), properties.getTimeout(), new Watcher() {
+                @Override
+                public void process(WatchedEvent event) {
+                    if(Event.KeeperState.SyncConnected==event.getState()){
+                        //如果收到了服务端的响应事件,连接成功
+                        countDownLatch.countDown();
+                    }
+                    log.info("收到了服务器的响应事件，状态为{}",event.getState());
+                }
+            });
+            countDownLatch.await();
+            log.info("【初始化ZooKeeper连接状态....】= {}",zooKeeper.getState());
+        }catch (Exception e){
+            log.error("初始化ZooKeeper连接异常....】= {}",e.getMessage());
+        }
+        return  zooKeeper;
+    }
+
+}
+```
+
+### 6.2 创建一个新的节点
+
+**相关的参数如下：**
+
+- **path** - Znode路径。例如，/myapp1，/myapp2，/myapp1/mydata1，myapp2/mydata1/myanothersubdata
+
+- **data** - 要存储在指定znode路径中的数据
+
+- **acl** - 要创建的节点的访问控制列表。ZooKeeper API提供了一个静态接口 **ZooDefs.Ids** 来获取一些基本的acl列表。例如，ZooDefs.Ids.OPEN_ACL_UNSAFE返回打开znode的acl列表。
+
+- **createMode** - 节点的类型，即临时，顺序或两者。这是一个**枚举**。其中
+
+  ​    **PERSISTENT：**持久化目录节点 
+
+  ​    **PERSISTENT_SEQUENTIAL：**顺序自动编号持久化目录节点, 存储数据不会丢失, 会根据当前已存在节点数自动加1, 然后返回给客户端已经创建成功的节点名
+
+  ​    **EPHEMERAL_SEQUENTIAL：** 临时自动编号节点, 一旦创建这个节点,当回话结束, 节点会被删除, 并且根据当前已经存在的节点数自动加1, 然后返回给客户端已经成功创建的目录节点名 .
+
+```java
+public void create(String name,String data) throws KeeperException, InterruptedException {
+    log.info("创建zk的节点{}，数据为{}",name,data);
+    String result = zkClient.create(name,data.getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+    log.info("返回的结果为{}",result);
+}
+```
+
+### 6.3 获取子节点并监听其变化
+
+#### 6.3.1 局部监听器
+
+```java
+/**
+ * 获取节点时，并对其进行监听，使用非系统的监听器处理
+ * @param path  监听的路径信息
+ */
+public void getChildrenWatch(String path) throws KeeperException, InterruptedException {
+    final String nodePath = path;
+    zkClient.getChildren(path, watchedEvent -> {
+        try{
+            List<String> childs = zkClient.getChildren(nodePath, (Watcher) this);
+            log.info("自定义节点监控-根节点下的子节点: {}, 类型: {}",childs,watchedEvent.getType());
+        }catch (Exception e){
+            e.printStackTrace();
+        }
+    });
+    // 线程休眠, 否则不能监控到数据
+    Thread.sleep(Long.MAX_VALUE);
+}
+```
+
+#### 6.3.2 全局监听器
+
+```java
+/**
+ * 全局监听器
+ * @author wang
+ */
+@Slf4j
+public class WatcherApi implements Watcher {
+    @Override
+    public void process(WatchedEvent watchedEvent) {
+        log.info("【Watcher监听事件】={}",watchedEvent.getState());
+        log.info("【监听路径为】={}",watchedEvent.getPath());
+        //  三种监听类型： 创建，删除，更新
+        log.info("【监听的类型为】={}",watchedEvent.getType());
+    }
+}
+```
+
+```java
+public void getChildren() throws KeeperException, InterruptedException {
+    List<String> children = zkClient.getChildren("/", true);
+    for (String child : children) {
+        System.out.println(child);
+    }
+    // 延时
+    Thread.sleep(Long.MAX_VALUE);
+}
+```
+
+### 6.4 客户端向服务端写数据流程
+
+#### 6.4.1 发送给leader
+
+​    客户端给服务器的leader发送写请求，写完数据后给手下发送写请求，手下写完发送给leader，超过半票以上都写了则发回给客户端。之后leader在给其他手下让他们写，写完在发数据给leader
+
+
+
+
+
+#### 6.4.2 发送给follower
+
+​    客户端给手下发送写的请求，手下给leader发送写的请求，写完后，给手下发送写的请求，手下写完后给leader发送确认，超过半票，leader确认后，发给刻划断，之后leader在发送写请求给其他手下
+
+
+
+### 6.5 服务器动态上下线监听
+
+1. 服务器上线的时候其实就是服务器启动时去注册信息（创建的都是临时节点）
+2. 客户端获取到当前在线的服务器列表后
+3. 服务器节点下线后给集群管理
+4. 集群管理服务器节点的下件时间通知给客户端
+5. 客户端通过获取服务器列表重选选择服务器
