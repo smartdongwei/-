@@ -372,3 +372,30 @@ public void getChildren() throws KeeperException, InterruptedException {
 3. 服务器节点下线后给集群管理
 4. 集群管理服务器节点的下件时间通知给客户端
 5. 客户端通过获取服务器列表重选选择服务器
+
+
+
+## 7：Paxos 算法
+
+​    Paxos算法解决的问题：就是如何快速正确的在一个分布式系统中对某个数据值达成一致，并且保证不论发生任何异常，都不会破坏整个系统的一致性
+
+![image-20220208092626705](E:\study\images\image-20220208092626705.png)
+
+## 8：ZAB协议
+
+只有一个服务器提交，没有服务器抢。主要的消息广播如下
+
+![image-20220208092724721](E:\study\images\image-20220208092724721.png)
+
+假设两种服务器异常情况：
+（1）假设一个事务在Leader提出之后，Leader挂了。
+（2）一个事务在Leader上提交了，并且过半的Follower都响应Ack了，但是Leader在Commit消息发出之前挂了。
+
+Zab协议崩溃恢复要求满足以下两个要求：
+（1）确保已经被Leader提交的提案Proposal，必须最终被所有的Follower服务器提交。 （已经产生的提案，Follower必须执行）
+（2）确保丢弃已经被Leader提出的，但是没有被提交的Proposal。（丢弃胎死腹中的提案）
+
+之后开始新的leader的选举
+Leader选举：根据上述要求，Zab协议需要保证选举出来的Leader需要满足以下条件：
+（1）新选举出来的Leader不能包含未提交的Proposal。即新Leader必须都是已经提交了Proposal的Follower服务器节点
+（2）新选举的Leader节点中含有最大的zxid。这样做的好处是可以避免Leader服务器检查Proposal的提交和丢弃工作。
